@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gamesheet Stable Data Overlay</title>
+<title>Gamesheet Direct Live API Overlay</title>
 <style>
   /* ── LAYOUT CONFIG ─────────────────────────────────────────────────── */
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -78,7 +78,7 @@
     color: #ffffff;
   }
 
-  /* ── TELEMETRY STATUS MONITOR ──────────────────────────────────────── */
+  /* ── STATUS MONITOR ────────────────────────────────────────────────── */
   #status {
     position: absolute;
     top: 16px;
@@ -108,13 +108,13 @@
   </div>
 </div>
 
-<div id="status">Sync Initializing...</div>
+<div id="status">Connecting directly to GameSheet Live Stream Data Engine...</div>
 
 <script>
 const CONFIG = {
-  // Put ANY gamesheet match page URL here
-  gameUrl: 'https://gamesheetstats.com/seasons/15077/games/2901445',
-  refreshSeconds: 15
+  // Target Game ID 
+  gameId: '2901445',
+  refreshSeconds: 10
 };
 
 const statusEl = document.getElementById('status');
@@ -126,61 +126,42 @@ function log(msg) {
 
 async function fetchTelemetryData() {
   try {
-    // We use a completely different public proxy bridge that skips all browser security walls
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(CONFIG.gameUrl)}`;
+    // Connect directly to GameSheet's open public API endpoint for data hydration
+    const apiUrl = `https://gamesheetstats.com/api/v1/games/${CONFIG.gameId}`;
 
-    const res = await fetch(proxyUrl);
-    if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+    const res = await fetch(apiUrl);
+    if (!res.ok) throw new Error(`API Status Error (${res.status})`);
     
-    const htmlText = await res.text();
-    if (!htmlText) throw new Error("Empty data layer");
-
-    let hScore = "0", aScore = "0", hShots = "0", aShots = "0";
-
-    // Fallback String Scan Strategy: Look inside the NextJS build configuration text strings
-    const nextDataMatch = htmlText.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    const rootData = await res.json();
     
-    if (nextDataMatch) {
-      const parsedJSON = JSON.parse(nextDataMatch[1]);
-      const gameObj = parsedJSON.props?.pageProps?.initialState?.game || parsedJSON.props?.pageProps?.game;
-      
-      if (gameObj) {
-        hScore = gameObj.homeGoals ?? gameObj.homeScore ?? "0";
-        aScore = gameObj.awayGoals ?? gameObj.awayScore ?? "0";
-        hShots = gameObj.homeShots ?? gameObj.homeSog ?? "0";
-        aShots = gameObj.awayShots ?? gameObj.awaySog ?? "0";
-      }
-    }
+    // Look up the nested telemetry properties safely from the JSON model
+    const game = rootData?.game || rootData;
+    
+    if (!game) throw new Error("Unexpected API data block format");
 
-    // Double Check System: If the JSON layout structural keys vary, use direct text boundaries
-    if (hScore === "0" && aScore === "0") {
-      const hScoreMatch = htmlText.match(/"homeGoals"\s*:\s*([0-9]+)/i) || htmlText.match(/"homeScore"\s*:\s*([0-9]+)/i);
-      const aScoreMatch = htmlText.match(/"awayGoals"\s*:\s*([0-9]+)/i) || htmlText.match(/"awayScore"\s*:\s*([0-9]+)/i);
-      const hShotsMatch = htmlText.match(/"homeShots"\s*:\s*([0-9]+)/i) || htmlText.match(/"homeSog"\s*:\s*([0-9]+)/i);
-      const aShotsMatch = htmlText.match(/"awayShots"\s*:\s*([0-9]+)/i) || htmlText.match(/"awaySog"\s*:\s*([0-9]+)/i);
+    // Extracting scores and shots cleanly
+    const hScore = game.homeGoals ?? game.homeScore ?? 0;
+    const aScore = game.awayGoals ?? game.awayScore ?? 0;
+    const hShots = game.homeShots ?? game.homeSog ?? 0;
+    const aShots = game.awayShots ?? game.awaySog ?? 0;
 
-      if (hScoreMatch) hScore = hScoreMatch[1];
-      if (aScoreMatch) aScore = aScoreMatch[1];
-      if (hShotsMatch) hShots = hShotsMatch[1];
-      if (aShotsMatch) aShots = aShotsMatch[1];
-    }
-
-    // Push properties to HTML
+    // Update overlay view properties
     document.getElementById('home-score').textContent = hScore;
     document.getElementById('away-score').textContent = aScore;
     document.getElementById('home-shots').textContent = hShots;
     document.getElementById('away-shots').textContent = aShots;
 
     panelEl.classList.add('visible');
-    log(`Connected: ${hScore}-${aScore}`);
+    log(`Sync Successful: Score ${hScore}-${aScore} | Shots ${hShots}-${aShots}`);
 
   } catch (err) {
-    log(`Data Blocked: ${err.message}`);
+    log(`Sync Interrupted: ${err.message}`);
   }
 }
 
 function init() {
   fetchTelemetryData();
+  // Runs a clean update every 10 seconds automatically
   setInterval(fetchTelemetryData, CONFIG.refreshSeconds * 1000);
 }
 
