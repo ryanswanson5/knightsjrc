@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gamesheet Numbers Only Overlay</title>
+<style>
+  /* ── LAYOUT CONFIG ─────────────────────────────────────────────────── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: transparent;
+    font-family: 'Arial Narrow', Arial, sans-serif;
+  }
+
+  /* ── SCOREBOARD PANEL ──────────────────────────────────────────────── */
+  #numeric-scoreboard {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+  }
+
+  #numeric-scoreboard.visible { opacity: 1; }
+
+  /* Main score row container */
+  .score-row {
+    display: flex;
+    align-items: center;
+    background: #111111;
+    height: 72px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .score-box {
+    background: #e8c84a;
+    height: 72px;
+    width: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 46px;
+    font-weight: 900;
+    color: #111111;
+  }
+
+  .score-divider {
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 700;
+    padding: 0 20px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Shots strip positioned underneath */
+  .shots-strip {
+    display: flex;
+    align-items: center;
+    background: rgba(17, 17, 17, 0.85);
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #cccccc;
+    gap: 14px;
+  }
+
+  .shots-strip span {
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  /* ── TELEMETRY STATUS ──────────────────────────────────────────────── */
+  #status {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    font-family: monospace;
+    background: rgba(0,0,0,0.8);
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div id="numeric-scoreboard">
+  <div class="score-row">
+    <div class="score-box" id="home-score">—</div>
+    <div class="score-divider">VS</div>
+    <div class="score-box" id="away-score">—</div>
+  </div>
+
+  <div class="shots-strip">
+    <div>SOG: <span id="home-shots">—</span></div>
+    <div style="color: #555;">|</div>
+    <div>SOG: <span id="away-shots">—</span></div>
+  </div>
+</div>
+
+<div id="status">Syncing Data...</div>
+
+<script>
+const CONFIG = {
+  // Update this to ANY active gamesheet link you want to track
+  gameUrl: 'https://gamesheetstats.com/seasons/15077/games/2901445',
+  refreshSeconds: 15, 
+};
+
+const statusEl = document.getElementById('status');
+const panelEl = document.getElementById('numeric-scoreboard');
+
+function log(msg) {
+  statusEl.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+}
+
+async function fetchTelemetryData() {
+  try {
+    // Append the NextJS payload query router token directly to extract variables
+    const targetUrl = CONFIG.gameUrl.includes('?') 
+      ? `${CONFIG.gameUrl}&_rsc=1` 
+      : `${CONFIG.gameUrl}?_rsc=1`;
+
+    const res = await fetch(targetUrl, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    const dataStream = await res.text();
+
+    // Scan the clean JSON property signatures directly
+    const matchHomeScore = dataStream.match(/"home(?:Score|Goals)"\s*:\s*([0-9]+)/i);
+    const matchAwayScore = dataStream.match(/"away(?:Score|Goals)"\s*:\s*([0-9]+)/i);
+    const matchHomeShots = dataStream.match(/"home(?:Shots|Sog)"\s*:\s*([0-9]+)/i);
+    const matchAwayShots = dataStream.match(/"away(?:Shots|Sog)"\s*:\s*([0-9]+)/i);
+
+    // Apply values or fall back to zero if game hasn't registered stats yet
+    const telemetry = {
+      homeScore: matchHomeScore ? matchHomeScore[1] : "0",
+      awayScore: matchAwayScore ? matchAwayScore[1] : "0",
+      homeShots: matchHomeShots ? matchHomeShots[1] : "0",
+      awayShots: matchAwayShots ? matchAwayShots[1] : "0"
+    };
+
+    // Output to screen instantly
+    document.getElementById('home-score').textContent = telemetry.homeScore;
+    document.getElementById('away-score').textContent = telemetry.awayScore;
+    document.getElementById('home-shots').textContent = telemetry.homeShots;
+    document.getElementById('away-shots').textContent = telemetry.awayShots;
+
+    panelEl.classList.add('visible');
+    log(`Sync Active: ${telemetry.homeScore}-${telemetry.awayScore}`);
+
+  } catch (err) {
+    log(`Sync Error: ${err.message}`);
+  }
+}
+
+function init() {
+  fetchTelemetryData();
+  setInterval(fetchTelemetryData, CONFIG.refreshSeconds * 1000);
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
