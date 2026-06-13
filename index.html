@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gamesheet Numbers Only Overlay</title>
+<title>Gamesheet Direct Numbers Only Overlay</title>
 <style>
   /* ── LAYOUT CONFIG ─────────────────────────────────────────────────── */
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -32,7 +32,6 @@
 
   #numeric-scoreboard.visible { opacity: 1; }
 
-  /* Main score row container */
   .score-row {
     display: flex;
     align-items: center;
@@ -62,7 +61,6 @@
     letter-spacing: 0.05em;
   }
 
-  /* Shots strip positioned underneath */
   .shots-strip {
     display: flex;
     align-items: center;
@@ -80,7 +78,7 @@
     color: #ffffff;
   }
 
-  /* ── TELEMETRY STATUS ──────────────────────────────────────────────── */
+  /* ── STATUS MONITOR ────────────────────────────────────────────────── */
   #status {
     position: absolute;
     top: 16px;
@@ -110,13 +108,13 @@
   </div>
 </div>
 
-<div id="status">Syncing Data...</div>
+<div id="status">Connecting proxy relay...</div>
 
 <script>
 const CONFIG = {
-  // Update this to ANY active gamesheet link you want to track
+  // Target Gamesheet game page
   gameUrl: 'https://gamesheetstats.com/seasons/15077/games/2901445',
-  refreshSeconds: 15, 
+  refreshSeconds: 20
 };
 
 const statusEl = document.getElementById('status');
@@ -128,38 +126,51 @@ function log(msg) {
 
 async function fetchTelemetryData() {
   try {
-    // Append the NextJS payload query router token directly to extract variables
-    const targetUrl = CONFIG.gameUrl.includes('?') 
-      ? `${CONFIG.gameUrl}&_rsc=1` 
-      : `${CONFIG.gameUrl}?_rsc=1`;
+    // We use an allorigins proxy wrapper to completely handle CORS restriction 
+    // and pull the exact raw, live production HTML text from the server.
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(CONFIG.gameUrl)}&_=` + new Date().getTime();
 
-    const res = await fetch(targetUrl, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(proxyUrl);
+    if (!res.ok) throw new Error(`Proxy network error (${res.status})`);
     
-    const dataStream = await res.text();
+    const wrapper = await res.json();
+    const dataStream = wrapper.contents;
 
-    // Scan the clean JSON property signatures directly
-    const matchHomeScore = dataStream.match(/"home(?:Score|Goals)"\s*:\s*([0-9]+)/i);
-    const matchAwayScore = dataStream.match(/"away(?:Score|Goals)"\s*:\s*([0-9]+)/i);
-    const matchHomeShots = dataStream.match(/"home(?:Shots|Sog)"\s*:\s*([0-9]+)/i);
-    const matchAwayShots = dataStream.match(/"away(?:Shots|Sog)"\s*:\s*([0-9]+)/i);
+    if (!dataStream) throw new Error("Empty dataset received from server.");
 
-    // Apply values or fall back to zero if game hasn't registered stats yet
-    const telemetry = {
-      homeScore: matchHomeScore ? matchHomeScore[1] : "0",
-      awayScore: matchAwayScore ? matchAwayScore[1] : "0",
-      homeShots: matchHomeShots ? matchHomeShots[1] : "0",
-      awayShots: matchAwayShots ? matchAwayShots[1] : "0"
-    };
+    // Direct lookups matching Gamesheet's data objects layout style:
+    // e.g., "home":{"score":10,"shots":34...}
+    const homeMatch = dataStream.match(/"home"\s*:\s*\{\s*"score"\s*:\s*([0-9]+)\s*,\s*"shots"\s*:\s*([0-9]+)/i);
+    const awayMatch = dataStream.match(/"away"\s*:\s*\{\s*"score"\s*:\s*([0-9]+)\s*,\s*"shots"\s*:\s*([0-9]+)/i);
 
-    // Output to screen instantly
+    let telemetry = { homeScore: "0", homeShots: "0", awayScore: "0", awayShots: "0" };
+
+    if (homeMatch && awayMatch) {
+      telemetry.homeScore = homeMatch[1];
+      telemetry.homeShots = homeMatch[2];
+      telemetry.awayScore = awayMatch[1];
+      telemetry.awayShots = awayMatch[2];
+    } else {
+      // Secondary fallback scanner: scan looser key pairings if object order changes on live updates
+      const hScore = dataStream.match(/"home"[\s\S]*?"score"\s*:\s*([0-9]+)/i);
+      const aScore = dataStream.match(/"away"[\s\S]*?"score"\s*:\s*([0-9]+)/i);
+      const hShots = dataStream.match(/"home"[\s\S]*?"shots"\s*:\s*([0-9]+)/i);
+      const aShots = dataStream.match(/"away"[\s\S]*?"shots"\s*:\s*([0-9]+)/i);
+
+      if (hScore) telemetry.homeScore = hScore[1];
+      if (aScore) telemetry.awayScore = aScore[1];
+      if (hShots) telemetry.homeShots = hShots[1];
+      if (aShots) telemetry.awayShots = aShots[1];
+    }
+
+    // Push right to the OBS output view
     document.getElementById('home-score').textContent = telemetry.homeScore;
     document.getElementById('away-score').textContent = telemetry.awayScore;
     document.getElementById('home-shots').textContent = telemetry.homeShots;
     document.getElementById('away-shots').textContent = telemetry.awayShots;
 
     panelEl.classList.add('visible');
-    log(`Sync Active: ${telemetry.homeScore}-${telemetry.awayScore}`);
+    log(`Update Active: Score ${telemetry.homeScore}-${telemetry.awayScore} | SOG ${telemetry.homeShots}-${telemetry.awayShots}`);
 
   } catch (err) {
     log(`Sync Error: ${err.message}`);
